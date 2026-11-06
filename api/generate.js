@@ -14,8 +14,8 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Missing GEMINI_API_KEY on Vercel' });
     }
 
-    // Using Gemini 1.5 Flash for speed and accuracy
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    // Using Gemini 3 Flash for speed and accuracy
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
     const payload = {
       contents: [{ 
