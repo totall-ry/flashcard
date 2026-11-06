@@ -93,7 +93,6 @@ export default function App() {
       setEmail('');
       setPassword('');
     } catch (err) {
-      // Clean up Firebase error messages for the user
       setAuthError(err.message.replace('Firebase: ', ''));
     } finally {
       setAuthProcessLoading(false);
@@ -167,7 +166,7 @@ export default function App() {
   };
 
   const handleDeleteDeck = async (e, deckId) => {
-    e.stopPropagation(); // Prevent opening the deck when clicking delete
+    e.stopPropagation(); 
     if (window.confirm("Are you sure you want to delete this deck? This cannot be undone.")) {
       try {
         await deleteDoc(doc(db, 'users', user.uid, 'decks', deckId));
@@ -320,14 +319,7 @@ export default function App() {
                 className="flex-1 text-left px-4 py-3 flex items-center justify-between truncate"
               >
                 <span className={`truncate pr-2 font-medium ${activeDeck?.id === deck.id ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>{deck.name}</span>
-                <span className={`text-xs px-2 py-1 rounded-full ${activeDeck?.id === deck.id ? 'bg-indigo-500' : 'bg-gray-700 text-gray-300'}`}>
-                  {deck.cards.length}
-                </span>
-              </button>
-              
-              <button 
-                onClick={(e) => handleDeleteDeck(e, deck.id)}
-                className={`p-3 text-gray-400 hover:text-red-400 transition-colors ${activeDeck?.id === deck.id ? 'text-indigo-200 hover:text-white' : ''}`}
+                <span className={`text-xs px-2 py-1 rounded-full ${activeDeck?.id === deck.id ? 'bg-indigo-500' : 'bg-gray-700 text-gray-300'}`}> {deck.cards.length} </span> </button>  <button onClick={(e) => handleDeleteDeck(e, deck.id)} className={`p-3 text-gray-400 hover:text-red-400 transition-colors ${activeDeck?.id === deck.id ? 'text-indigo-200 hover:text-white' : ''}`}
                 title="Delete Deck"
               >
                 <Trash2 size={18} />
@@ -361,10 +353,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col pt-16 md:pt-0 h-full w-full bg-gray-50/50 relative">
+      {/* Main Content Area - ADDED overflow-y-auto HERE to allow scrolling in landscape */}
+      <div className="flex-1 flex flex-col pt-16 md:pt-0 h-full w-full bg-gray-50/50 relative overflow-y-auto">
         {!activeDeck ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center w-full">
+          <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center w-full min-h-max pb-24">
             <div className="max-w-xl w-full bg-white rounded-3xl shadow-xl p-8 sm:p-14 border border-gray-100">
               <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
                  <UploadCloud className="text-indigo-600" size={40} />
@@ -374,78 +366,4 @@ export default function App() {
                 Transform your lecture slides into interactive flashcards automatically. We support .pptx files.
               </p>
               
-              <label htmlFor="file-upload" className={`relative flex items-center justify-center w-full py-4 px-6 rounded-2xl text-lg font-bold text-white transition-all cursor-pointer ${loading ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg hover:-translate-y-1'}`}>
-                {loading ? (
-                  <span className="flex items-center gap-3"><Loader2 className="animate-spin" size={24}/> Processing File...</span>
-                ) : (
-                  <span className="flex items-center gap-3"><Plus size={24}/> Select PPTX File</span>
-                )}
-                <input id="file-upload" type="file" accept=".pptx" className="hidden" onChange={handleFileUpload} disabled={loading} />
-              </label>
-              
-              {loading && <p className="mt-6 text-sm font-semibold text-indigo-600 animate-pulse bg-indigo-50 py-2 px-4 rounded-full inline-block">{loadingText}</p>}
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col p-4 sm:p-8 lg:p-10 max-w-5xl mx-auto w-full h-full justify-center">
-            
-            <div className="flex items-center justify-between mb-4 sm:mb-8">
-              <button onClick={() => setActiveDeck(null)} className="flex items-center gap-2 text-gray-500 hover:text-indigo-600 font-semibold transition-colors bg-white px-4 py-2 rounded-full shadow-sm border border-gray-100">
-                <ArrowLeft size={18} /> <span className="hidden sm:inline">Back to Library</span>
-              </button>
-              <div className="text-right">
-                <h2 className="text-lg sm:text-2xl font-bold text-gray-900 truncate max-w-[150px] sm:max-w-sm">{activeDeck.name}</h2>
-                <p className="text-indigo-600 font-medium text-sm sm:text-base">Card {currentCardIndex + 1} of {activeDeck.cards.length}</p>
-              </div>
-            </div>
-
-            {/* Flashcard 3D Wrapper */}
-            <div className="relative w-full aspect-[4/5] sm:aspect-[3/2] max-w-3xl mx-auto [perspective:1200px] group mb-4 sm:mb-8">
-              <div className={`w-full h-full transition-all duration-500 [transform-style:preserve-3d] cursor-pointer ${isFlipped ? '[transform:rotateY(180deg)]' : ''}`}>
-                
-                {/* Front */}
-                <div className="absolute inset-0 w-full h-full [backface-visibility:hidden] bg-white shadow-xl hover:shadow-2xl rounded-3xl p-8 sm:p-12 flex flex-col justify-center items-center text-center border-2 border-indigo-50 transition-all" onClick={() => setIsFlipped(true)}>
-                  <div className="w-full max-h-full overflow-y-auto no-scrollbar flex items-center justify-center">
-                     <h3 className="text-xl sm:text-3xl lg:text-4xl font-bold text-gray-800 leading-snug">
-                       {activeDeck.cards[currentCardIndex].q}
-                     </h3>
-                  </div>
-                  <div className="absolute bottom-6 sm:bottom-8 text-indigo-400 text-xs sm:text-sm font-bold tracking-widest uppercase">
-                    Tap to reveal answer
-                  </div>
-                </div>
-
-                {/* Back */}
-                <div className="absolute inset-0 w-full h-full [backface-visibility:hidden] [transform:rotateY(180deg)] bg-indigo-600 shadow-2xl rounded-3xl p-8 sm:p-12 flex flex-col justify-center items-center text-center" onClick={() => setIsFlipped(false)}>
-                  <div className="w-full max-h-full overflow-y-auto no-scrollbar flex items-center justify-center">
-                    <h3 className="text-lg sm:text-2xl lg:text-3xl font-medium text-white leading-relaxed">
-                      {activeDeck.cards[currentCardIndex].a}
-                    </h3>
-                  </div>
-                  <div className="absolute bottom-6 sm:bottom-8 text-indigo-200 text-xs sm:text-sm font-bold tracking-widest uppercase">
-                    Tap to see question
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Controls */}
-            <div className="flex items-center justify-center gap-4 sm:gap-8 mb-4 sm:mb-0">
-              <button onClick={prevCard} className="p-4 sm:p-5 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-indigo-50 text-gray-800 transition-all hover:-translate-y-1 active:scale-95 focus:ring-4 focus:ring-indigo-100">
-                <ChevronLeft size={28} />
-              </button>
-              <div className="h-3 w-32 sm:w-48 bg-gray-200 rounded-full overflow-hidden shadow-inner">
-                 <div className="h-full bg-indigo-600 transition-all duration-300 ease-out" style={{ width: `${((currentCardIndex + 1) / activeDeck.cards.length) * 100}%` }}></div>
-              </div>
-              <button onClick={nextCard} className="p-4 sm:p-5 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-indigo-50 text-gray-800 transition-all hover:-translate-y-1 active:scale-95 focus:ring-4 focus:ring-indigo-100">
-                <ChevronRight size={28} />
-              </button>
-            </div>
-
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+              <label htmlFor="file-upload" className={`relative flex items-center justify-center w-full py-4 px-6 rounded-2xl text-lg font-bold text-white transition-all cursor-pointer
