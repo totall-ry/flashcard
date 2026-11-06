@@ -137,7 +137,10 @@ export default function App() {
         body: JSON.stringify({ text: fullText.substring(0, 15000) })
       });
 
-      if (!response.ok) throw new Error("Failed to generate flashcards from AI.");
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(`Backend Error: ${errData.error || response.statusText}`);
+      }
       const data = await response.json();
       
       if (!data.flashcards || data.flashcards.length === 0) throw new Error("AI returned empty flashcards.");
