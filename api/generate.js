@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     }
 
     // Using Gemini 3 Flash for speed and accuracy
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-4-argon:generateContent?key=${apiKey}`;
 
     const payload = {
       contents: [{ 
