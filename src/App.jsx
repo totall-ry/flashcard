@@ -2,525 +2,449 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged,
-  signOut
+  onAuthStateChanged, 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword,
+  signOut 
 } from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
-  doc, 
-  setDoc, 
-  deleteDoc,
-  onSnapshot 
+  addDoc, 
+  getDocs, 
+  query, 
+  orderBy, 
+  serverTimestamp, 
+  deleteDoc, 
+  doc 
 } from 'firebase/firestore';
 import { 
-  UploadCloud, 
-  Layers, 
-  Plus, 
-  ChevronRight, 
-  ChevronLeft, 
-  Trash2, 
-  LogOut, 
-  Loader2,
-  BookOpen,
-  CheckCircle2,
-  AlertCircle
+  UploadCloud, Loader2, Library, Plus, ChevronLeft, ChevronRight, 
+  Menu, X, ArrowLeft, RotateCcw, LogOut, Trash2, Mail, Lock 
 } from 'lucide-react';
+import JSZip from 'jszip';
 
-// --- Firebase Initialization (Using your .env variables) ---
+// Firebase Initialization
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'personal-flashcard-app';
-
-// --- Global Styles for 3D Flip ---
-const styles = `
-  .perspective-1000 { perspective: 1000px; }
-  .transform-style-3d { transform-style: preserve-3d; }
-  .backface-hidden { backface-visibility: hidden; }
-  .rotate-y-180 { transform: rotateY(180deg); }
-  
-  .scrollbar-hide::-webkit-scrollbar { display: none; }
-  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-`;
 
 export default function App() {
+  // Auth State
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isLoginView, setIsLoginView] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authProcessLoading, setAuthProcessLoading] = useState(false);
+
+  // App State
   const [decks, setDecks] = useState([]);
   const [activeDeck, setActiveDeck] = useState(null);
-  const [view, setView] = useState('dashboard');
-  const [jsZipLoaded, setJsZipLoaded] = useState(false);
+  const [currentCardIndex, setCurrentCardIndex] = useState(0);
+  const [isFlipped, setIsFlipped] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadingText, setLoadingText] = useState("");
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [continuePortrait, setContinuePortrait] = useState(false);
 
-  // --- Auth Flow ---
+  // Authenticate & Load Decks
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-      } catch (err) {
-        console.error("Auth init error:", err);
-      }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      if (currentUser) {
+        try {
+          const q = query(collection(db, 'users', currentUser.uid, 'decks'), orderBy('createdAt', 'desc'));
+          const snapshot = await getDocs(q);
+          setDecks(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        } catch (error) {
+          console.error("Error loading decks:", error);
+        }
+      } else {
+        setDecks([]);
+        setActiveDeck(null);
+      }
       setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  // --- Load JSZip Dynamically ---
-  useEffect(() => {
-    if (!document.getElementById('jszip-script')) {
-      const script = document.createElement('script');
-      script.id = 'jszip-script';
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-      script.onload = () => setJsZipLoaded(true);
-      document.head.appendChild(script);
-    } else {
-      setJsZipLoaded(true);
-    }
-  }, []);
-
-  // --- Fetch Data ---
-  useEffect(() => {
-    if (!user) return;
-
-    const decksRef = collection(db, 'apps', appId, 'users', user.uid, 'decks');
-    const unsubscribe = onSnapshot(decksRef, 
-      (snapshot) => {
-        const fetchedDecks = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        fetchedDecks.sort((a, b) => b.createdAt - a.createdAt);
-        setDecks(fetchedDecks);
-      },
-      (error) => console.error("Error fetching decks:", error)
-    );
-
-    return () => unsubscribe();
-  }, [user]);
-
-  const handleLogout = () => signOut(auth);
-
-  const deleteDeck = async (deckId) => {
-    if (!user) return;
+  // --- AUTHENTICATION HANDLERS ---
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthProcessLoading(true);
     try {
-      await deleteDoc(doc(db, 'apps', appId, 'users', user.uid, 'decks', deckId));
-      if (activeDeck?.id === deckId) {
-        setActiveDeck(null);
-        setView('dashboard');
+      if (isLoginView) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
       }
+      setEmail('');
+      setPassword('');
     } catch (err) {
-      console.error("Error deleting deck:", err);
+      // Clean up Firebase error messages for the user
+      setAuthError(err.message.replace('Firebase: ', ''));
+    } finally {
+      setAuthProcessLoading(false);
     }
   };
 
-  if (authLoading || !user) {
+  const handleLogout = () => {
+    signOut(auth);
+    setIsMobileMenuOpen(false);
+  };
+
+  // --- APP HANDLERS ---
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      setLoading(true);
+      setLoadingText("Extracting text from PowerPoint...");
+      setIsMobileMenuOpen(false);
+
+      const zip = new JSZip();
+      const loadedZip = await zip.loadAsync(file);
+      let fullText = "";
+
+      for (const [filename, fileData] of Object.entries(loadedZip.files)) {
+        if (filename.startsWith('ppt/slides/slide') && filename.endsWith('.xml')) {
+          const xmlData = await fileData.async('string');
+          const matches = xmlData.match(/<a:t>.*?<\/a:t>/g);
+          if (matches) {
+            fullText += matches.map(m => m.replace(/<a:t>|<\/a:t>/g, '')).join(' ') + " \n";
+          }
+        }
+      }
+
+      if (!fullText.trim()) throw new Error("No readable text found in this PPTX.");
+
+      setLoadingText("Generating smart flashcards with AI...");
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: fullText.substring(0, 15000) })
+      });
+
+      if (!response.ok) throw new Error("Failed to generate flashcards from AI.");
+      const data = await response.json();
+      
+      if (!data.flashcards || data.flashcards.length === 0) throw new Error("AI returned empty flashcards.");
+
+      setLoadingText("Saving deck...");
+      const deckName = file.name.replace('.pptx', '');
+      const deckRef = await addDoc(collection(db, 'users', user.uid, 'decks'), {
+        name: deckName,
+        cards: data.flashcards,
+        createdAt: serverTimestamp()
+      });
+
+      const newDeck = { id: deckRef.id, name: deckName, cards: data.flashcards };
+      setDecks([newDeck, ...decks]);
+      setActiveDeck(newDeck);
+      setCurrentCardIndex(0);
+      setIsFlipped(false);
+
+    } catch (err) {
+      alert("Error: " + err.message);
+    } finally {
+      setLoading(false);
+      setLoadingText("");
+      e.target.value = '';
+    }
+  };
+
+  const handleDeleteDeck = async (e, deckId) => {
+    e.stopPropagation(); // Prevent opening the deck when clicking delete
+    if (window.confirm("Are you sure you want to delete this deck? This cannot be undone.")) {
+      try {
+        await deleteDoc(doc(db, 'users', user.uid, 'decks', deckId));
+        setDecks(decks.filter(d => d.id !== deckId));
+        if (activeDeck?.id === deckId) setActiveDeck(null);
+      } catch (err) {
+        alert("Failed to delete deck.");
+      }
+    }
+  };
+
+  const nextCard = () => {
+    setIsFlipped(false);
+    setTimeout(() => setCurrentCardIndex((prev) => (prev + 1) % activeDeck.cards.length), 150);
+  };
+
+  const prevCard = () => {
+    setIsFlipped(false);
+    setTimeout(() => setCurrentCardIndex((prev) => (prev - 1 + activeDeck.cards.length) % activeDeck.cards.length), 150);
+  };
+
+  // --- INITIAL LOADING SCREEN ---
+  if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+      <div className="h-screen w-full flex items-center justify-center bg-gray-50">
+        <Loader2 className="animate-spin text-indigo-600" size={48} />
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans flex overflow-hidden">
-      <style>{styles}</style>
-      
-      {/* Sidebar */}
-      <div className="w-64 bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800 flex flex-col z-10">
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
-            <Layers className="w-5 h-5 text-white" />
+  // --- LOGIN / REGISTER SCREEN ---
+  if (!user) {
+    return (
+      <div className="min-h-screen w-full flex flex-col justify-center items-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-gray-100">
+          <div className="flex justify-center mb-6">
+            <div className="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center">
+              <Library className="text-indigo-600" size={32} />
+            </div>
           </div>
-          <h1 className="font-bold text-lg tracking-tight">SlideCards</h1>
-        </div>
-        
-        <div className="p-4 flex-1 overflow-y-auto scrollbar-hide">
-          <button 
-            onClick={() => setView('create')}
-            className="w-full flex items-center justify-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg font-medium transition-colors mb-6 shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            <span>New Deck</span>
-          </button>
+          <h2 className="text-2xl font-bold text-center text-gray-900 mb-2">
+            {isLoginView ? 'Welcome back' : 'Create an account'}
+          </h2>
+          <p className="text-center text-gray-500 mb-8">
+            {isLoginView ? 'Enter your details to access your flashcards.' : 'Sign up to start transforming your slides.'}
+          </p>
 
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Your Decks</div>
-          {decks.length === 0 ? (
-            <div className="text-sm text-slate-500 text-center py-4">No decks yet.</div>
-          ) : (
-            <div className="space-y-1">
-              {decks.map(deck => (
-                <div 
-                  key={deck.id}
-                  className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${activeDeck?.id === deck.id ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium' : 'hover:bg-slate-100 dark:hover:bg-slate-800/50'}`}
-                  onClick={() => {
-                    setActiveDeck(deck);
-                    setView('study');
-                  }}
-                >
-                  <div className="flex items-center space-x-3 truncate">
-                    <BookOpen className="w-4 h-4 opacity-70" />
-                    <span className="truncate text-sm">{deck.title}</span>
-                  </div>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); deleteDeck(deck.id); }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-opacity"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            <div>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                <input 
+                  type="email" required placeholder="Email address"
+                  value={email} onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                />
+              </div>
+            </div>
+            <div>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                <input 
+                  type="password" required placeholder="Password (min 6 characters)"
+                  value={password} onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                />
+              </div>
+            </div>
+
+            {authError && <p className="text-red-500 text-sm font-medium text-center">{authError}</p>}
+
+            <button disabled={authProcessLoading} type="submit" className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-70 flex justify-center items-center">
+              {authProcessLoading ? <Loader2 className="animate-spin" size={24} /> : (isLoginView ? 'Sign In' : 'Sign Up')}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <button onClick={() => { setIsLoginView(!isLoginView); setAuthError(''); }} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+              {isLoginView ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- MAIN APP COMPONENT ---
+  return (
+    <div className="flex h-screen bg-gray-50 overflow-hidden font-sans relative">
+      
+      {/* Soft Landscape Warning Overlay (Dismissible) */}
+      {!continuePortrait && (
+        <div className="fixed inset-0 z-[9999] bg-gray-900/95 backdrop-blur-sm text-white flex-col items-center justify-center hidden portrait:flex md:portrait:hidden p-8 text-center transition-opacity">
+          <RotateCcw size={56} className="text-indigo-400 mb-6 animate-pulse" />
+          <h2 className="text-2xl font-bold mb-3 text-white">Better in Landscape</h2>
+          <p className="text-gray-300 mb-10 max-w-sm leading-relaxed">
+            SlideCards is optimized for horizontal viewing. Rotate your phone for the best experience.
+          </p>
+          <button 
+            onClick={() => setContinuePortrait(true)} 
+            className="px-8 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-full text-sm font-semibold text-gray-200 transition-all shadow-lg active:scale-95"
+          >
+            Continue in portrait mode
+          </button>
+        </div>
+      )}
+
+      {/* Mobile Top Navigation */}
+      <div className="md:hidden fixed top-0 w-full bg-gray-900 text-white z-40 px-4 py-3 flex items-center justify-between shadow-md">
+        <div className="flex items-center gap-2 font-bold text-lg">
+          <Library size={20} className="text-indigo-400" />
+          SlideCards AI
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(true)} className="p-1 text-gray-300 hover:text-white">
+          <Menu size={26} />
+        </button>
+      </div>
+
+      {isMobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 bg-black/60 z-40 transition-opacity" onClick={() => setIsMobileMenuOpen(false)} />
+      )}
+
+      {/* Sidebar */}
+      <div className={`fixed md:static inset-y-0 left-0 z-50 w-72 bg-gray-900 text-white flex flex-col transform transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 shadow-2xl md:shadow-none`}>
+        <div className="flex p-5 md:p-6 items-center justify-between border-b border-gray-800">
+          <div className="flex items-center gap-3">
+            <Library className="text-indigo-500" size={28} />
+            <h1 className="text-xl font-bold tracking-wide">SlideCards</h1>
+          </div>
+          <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-gray-400 hover:text-white">
+             <X size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          <div className="flex items-center justify-between mb-4 px-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Your Decks</p>
+            <span className="text-xs text-gray-600 font-medium">{decks.length} Total</span>
+          </div>
+          
+          {decks.map(deck => (
+            <div key={deck.id} className={`w-full rounded-xl transition-all duration-200 flex items-center justify-between group ${activeDeck?.id === deck.id ? 'bg-indigo-600 shadow-md' : 'hover:bg-gray-800'}`}>
+              <button
+                onClick={() => {
+                  setActiveDeck(deck);
+                  setCurrentCardIndex(0);
+                  setIsFlipped(false);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="flex-1 text-left px-4 py-3 flex items-center justify-between truncate"
+              >
+                <span className={`truncate pr-2 font-medium ${activeDeck?.id === deck.id ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>{deck.name}</span>
+                <span className={`text-xs px-2 py-1 rounded-full ${activeDeck?.id === deck.id ? 'bg-indigo-500' : 'bg-gray-700 text-gray-300'}`}>
+                  {deck.cards.length}
+                </span>
+              </button>
+              
+              <button 
+                onClick={(e) => handleDeleteDeck(e, deck.id)}
+                className={`p-3 text-gray-400 hover:text-red-400 transition-colors ${activeDeck?.id === deck.id ? 'text-indigo-200 hover:text-white' : ''}`}
+                title="Delete Deck"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+          ))}
+          {decks.length === 0 && (
+            <div className="px-2 py-6 text-sm text-gray-500 text-center border-2 border-dashed border-gray-800 rounded-xl mt-4">
+              No decks yet.<br/>Upload a PPTX to begin!
             </div>
           )}
+        </div>
+
+        <div className="p-4 border-t border-gray-800 space-y-3">
+          <button 
+            onClick={() => { setActiveDeck(null); setIsMobileMenuOpen(false); }}
+            className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 py-3 rounded-xl font-semibold transition-colors shadow-lg"
+          >
+            <Plus size={20} /> New Deck
+          </button>
+          
+          <div className="pt-2 flex items-center justify-between px-2">
+             <div className="text-xs text-gray-500 truncate pr-2 flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                {user.email}
+             </div>
+             <button onClick={handleLogout} className="text-gray-400 hover:text-red-400 transition-colors" title="Sign Out">
+                <LogOut size={20} />
+             </button>
+          </div>
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        {view === 'dashboard' && (
-           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
-             <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-full flex items-center justify-center mb-6">
-               <Layers className="w-10 h-10" />
-             </div>
-             <h2 className="text-2xl font-bold mb-2">Welcome to SlideCards</h2>
-             <p className="text-slate-500 max-w-md mb-8">
-               Transform your boring PowerPoint presentations into interactive flashcards automatically using AI.
-             </p>
-             <button 
-                onClick={() => setView('create')}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-full font-medium shadow-md shadow-indigo-500/20 transition-all flex items-center space-x-2"
-              >
-                <Plus className="w-5 h-5" />
-                <span>Upload a Presentation</span>
-              </button>
-           </div>
-        )}
-
-        {view === 'create' && (
-          <DeckCreator 
-            user={user} 
-            jsZipLoaded={jsZipLoaded} 
-            onSuccess={(deck) => {
-              setActiveDeck(deck);
-              setView('study');
-            }} 
-            onCancel={() => setView(decks.length > 0 ? 'study' : 'dashboard')}
-          />
-        )}
-
-        {view === 'study' && activeDeck && (
-          <StudyMode deck={activeDeck} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// --- Component: Deck Creator ---
-function DeckCreator({ user, jsZipLoaded, onSuccess, onCancel }) {
-  const [file, setFile] = useState(null);
-  const [deckTitle, setDeckTitle] = useState('');
-  const [status, setStatus] = useState('idle');
-  const [errorMsg, setErrorMsg] = useState('');
-
-  const parsePptx = async (pptxFile) => {
-    if (!window.JSZip) throw new Error("JSZip library not loaded yet.");
-    const zip = new window.JSZip();
-    const loadedZip = await zip.loadAsync(pptxFile);
-    
-    const slideFiles = Object.keys(loadedZip.files).filter(name => name.match(/^ppt\/slides\/slide\d+\.xml$/));
-    if (slideFiles.length === 0) throw new Error("No slides found in this presentation.");
-
-    let fullText = "";
-    for (const slide of slideFiles) {
-      const content = await loadedZip.files[slide].async("text");
-      const matches = content.match(/<a:t>(.*?)<\/a:t>/g);
-      if (matches) {
-        const slideText = matches.map(m => m.replace(/<\/?a:t>/g, '')).join(" ");
-        fullText += slideText + "\n\n";
-      }
-    }
-    
-    if (!fullText.trim()) throw new Error("Could not extract any text from the slides.");
-    return fullText;
-  };
-
-  const generateFlashcardsWithGemini = async (text) => {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-    const payload = {
-        contents: [{ parts: [{ text: `Create high-yield study flashcards from the following presentation text. Extract key concepts, definitions, and facts.\n\nText:\n${text.substring(0, 30000)}` }] }],
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "ARRAY",
-                items: {
-                    type: "OBJECT",
-                    properties: {
-                        question: { type: "STRING" },
-                        answer: { type: "STRING" }
-                    },
-                    required: ["question", "answer"]
-                }
-            }
-        },
-        systemInstruction: {
-            parts: [{ text: "You are an expert educator. Extract the most important concepts and definitions from the provided presentation text and create a list of concise Q&A flashcards. Keep answers focused and clear." }]
-        }
-    };
-
-    let response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) throw new Error("Failed to generate flashcards from AI.");
-    
-    const data = await response.json();
-    const contentText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
-    if (!contentText) throw new Error("Invalid AI response.");
-    return JSON.parse(contentText);
-  };
-
-  const handleGenerate = async () => {
-    if (!file || !deckTitle.trim()) return;
-    setStatus('parsing');
-    setErrorMsg('');
-    
-    try {
-      const extractedText = await parsePptx(file);
-      
-      setStatus('generating');
-      const cards = await generateFlashcardsWithGemini(extractedText);
-      
-      if (!cards || cards.length === 0) throw new Error("No flashcards were generated.");
-
-      setStatus('saving');
-      const newDeckId = crypto.randomUUID();
-      const deckObj = {
-        title: deckTitle.trim(),
-        cards: cards,
-        createdAt: Date.now()
-      };
-      
-      const deckRef = doc(db, 'apps', 'personal-flashcard-app', 'users', user.uid, 'decks', newDeckId);
-      await setDoc(deckRef, deckObj);
-      
-      setStatus('idle');
-      onSuccess({ id: newDeckId, ...deckObj });
-      
-    } catch (err) {
-      console.error(err);
-      setErrorMsg(err.message || "An unexpected error occurred.");
-      setStatus('error');
-    }
-  };
-
-  const isProcessing = status === 'parsing' || status === 'generating' || status === 'saving';
-
-  return (
-    <div className="flex-1 overflow-y-auto p-8 flex justify-center items-start">
-      <div className="w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden mt-8">
-        <div className="p-6 border-b border-slate-100 dark:border-slate-800">
-          <h2 className="text-xl font-bold">Create New Deck</h2>
-          <p className="text-slate-500 text-sm mt-1">Upload a PowerPoint file to auto-generate flashcards.</p>
-        </div>
-        
-        <div className="p-6 space-y-6">
-          <div>
-            <label className="block text-sm font-medium mb-2">Deck Title</label>
-            <input 
-              type="text" 
-              value={deckTitle}
-              onChange={(e) => setDeckTitle(e.target.value)}
-              placeholder="e.g., Biology Chapter 4"
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              disabled={isProcessing}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">PowerPoint File (.pptx)</label>
-            <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${file ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300'}`}>
-              <input 
-                type="file" 
-                accept=".pptx" 
-                onChange={(e) => setFile(e.target.files[0])}
-                className="hidden" 
-                id="file-upload"
-                disabled={isProcessing}
-              />
-              <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center">
-                {file ? (
-                  <>
-                    <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-3">
-                      <CheckCircle2 className="w-6 h-6" />
-                    </div>
-                    <span className="font-medium text-indigo-700">{file.name}</span>
-                  </>
+      <div className="flex-1 flex flex-col pt-16 md:pt-0 h-full w-full bg-gray-50/50 relative">
+        {!activeDeck ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center w-full">
+            <div className="max-w-xl w-full bg-white rounded-3xl shadow-xl p-8 sm:p-14 border border-gray-100">
+              <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+                 <UploadCloud className="text-indigo-600" size={40} />
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-4">Upload Presentation</h2>
+              <p className="text-gray-500 mb-8 leading-relaxed sm:text-lg">
+                Transform your lecture slides into interactive flashcards automatically. We support .pptx files.
+              </p>
+              
+              <label htmlFor="file-upload" className={`relative flex items-center justify-center w-full py-4 px-6 rounded-2xl text-lg font-bold text-white transition-all cursor-pointer ${loading ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg hover:-translate-y-1'}`}>
+                {loading ? (
+                  <span className="flex items-center gap-3"><Loader2 className="animate-spin" size={24}/> Processing File...</span>
                 ) : (
-                  <>
-                     <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mb-3">
-                        <UploadCloud className="w-6 h-6" />
-                     </div>
-                     <span className="font-medium">Click to upload PPTX</span>
-                  </>
+                  <span className="flex items-center gap-3"><Plus size={24}/> Select PPTX File</span>
                 )}
+                <input id="file-upload" type="file" accept=".pptx" className="hidden" onChange={handleFileUpload} disabled={loading} />
               </label>
+              
+              {loading && <p className="mt-6 text-sm font-semibold text-indigo-600 animate-pulse bg-indigo-50 py-2 px-4 rounded-full inline-block">{loadingText}</p>}
             </div>
           </div>
-
-          {errorMsg && (
-            <div className="bg-red-50 text-red-600 p-4 rounded-lg flex items-start space-x-3 text-sm">
-              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
+        ) : (
+          <div className="flex-1 flex flex-col p-4 sm:p-8 lg:p-10 max-w-5xl mx-auto w-full h-full justify-center">
+            
+            <div className="flex items-center justify-between mb-4 sm:mb-8">
+              <button onClick={() => setActiveDeck(null)} className="flex items-center gap-2 text-gray-500 hover:text-indigo-600 font-semibold transition-colors bg-white px-4 py-2 rounded-full shadow-sm border border-gray-100">
+                <ArrowLeft size={18} /> <span className="hidden sm:inline">Back to Library</span>
+              </button>
+              <div className="text-right">
+                <h2 className="text-lg sm:text-2xl font-bold text-gray-900 truncate max-w-[150px] sm:max-w-sm">{activeDeck.name}</h2>
+                <p className="text-indigo-600 font-medium text-sm sm:text-base">Card {currentCardIndex + 1} of {activeDeck.cards.length}</p>
+              </div>
             </div>
-          )}
 
-          {isProcessing && (
-            <div className="bg-slate-50 rounded-xl p-5 border border-slate-200">
-               <div className="flex items-center space-x-3 mb-3">
-                  <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-                  <span className="font-medium text-sm">Processing...</span>
-               </div>
+            {/* Flashcard 3D Wrapper */}
+            <div className="relative w-full aspect-[4/5] sm:aspect-[3/2] max-w-3xl mx-auto [perspective:1200px] group mb-4 sm:mb-8">
+              <div className={`w-full h-full transition-all duration-500 [transform-style:preserve-3d] cursor-pointer ${isFlipped ? '[transform:rotateY(180deg)]' : ''}`}>
+                
+                {/* Front */}
+                <div className="absolute inset-0 w-full h-full [backface-visibility:hidden] bg-white shadow-xl hover:shadow-2xl rounded-3xl p-8 sm:p-12 flex flex-col justify-center items-center text-center border-2 border-indigo-50 transition-all" onClick={() => setIsFlipped(true)}>
+                  <div className="w-full max-h-full overflow-y-auto no-scrollbar flex items-center justify-center">
+                     <h3 className="text-xl sm:text-3xl lg:text-4xl font-bold text-gray-800 leading-snug">
+                       {activeDeck.cards[currentCardIndex].q}
+                     </h3>
+                  </div>
+                  <div className="absolute bottom-6 sm:bottom-8 text-indigo-400 text-xs sm:text-sm font-bold tracking-widest uppercase">
+                    Tap to reveal answer
+                  </div>
+                </div>
+
+                {/* Back */}
+                <div className="absolute inset-0 w-full h-full [backface-visibility:hidden] [transform:rotateY(180deg)] bg-indigo-600 shadow-2xl rounded-3xl p-8 sm:p-12 flex flex-col justify-center items-center text-center" onClick={() => setIsFlipped(false)}>
+                  <div className="w-full max-h-full overflow-y-auto no-scrollbar flex items-center justify-center">
+                    <h3 className="text-lg sm:text-2xl lg:text-3xl font-medium text-white leading-relaxed">
+                      {activeDeck.cards[currentCardIndex].a}
+                    </h3>
+                  </div>
+                  <div className="absolute bottom-6 sm:bottom-8 text-indigo-200 text-xs sm:text-sm font-bold tracking-widest uppercase">
+                    Tap to see question
+                  </div>
+                </div>
+
+              </div>
             </div>
-          )}
-        </div>
 
-        <div className="p-6 border-t border-slate-100 flex justify-end space-x-3 bg-slate-50">
-          <button 
-            onClick={onCancel}
-            disabled={isProcessing}
-            className="px-5 py-2.5 rounded-lg text-slate-600 font-medium hover:bg-slate-200 transition-colors"
-          >
-            Cancel
-          </button>
-          <button 
-            onClick={handleGenerate}
-            disabled={!file || !deckTitle.trim() || isProcessing || !jsZipLoaded}
-            className="px-6 py-2.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
-          >
-            Generate Magic
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+            {/* Controls */}
+            <div className="flex items-center justify-center gap-4 sm:gap-8 mb-4 sm:mb-0">
+              <button onClick={prevCard} className="p-4 sm:p-5 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-indigo-50 text-gray-800 transition-all hover:-translate-y-1 active:scale-95 focus:ring-4 focus:ring-indigo-100">
+                <ChevronLeft size={28} />
+              </button>
+              <div className="h-3 w-32 sm:w-48 bg-gray-200 rounded-full overflow-hidden shadow-inner">
+                 <div className="h-full bg-indigo-600 transition-all duration-300 ease-out" style={{ width: `${((currentCardIndex + 1) / activeDeck.cards.length) * 100}%` }}></div>
+              </div>
+              <button onClick={nextCard} className="p-4 sm:p-5 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-indigo-50 text-gray-800 transition-all hover:-translate-y-1 active:scale-95 focus:ring-4 focus:ring-indigo-100">
+                <ChevronRight size={28} />
+              </button>
+            </div>
 
-// --- Component: Study Mode ---
-function StudyMode({ deck }) {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isFlipped, setIsFlipped] = useState(false);
-  const [isAnimating, setIsAnimating] = useState(false);
-
-  useEffect(() => {
-    setCurrentIndex(0);
-    setIsFlipped(false);
-  }, [deck.id]);
-
-  const cards = deck.cards || [];
-  const currentCard = cards[currentIndex];
-
-  const handleFlip = () => {
-    if (isAnimating) return;
-    setIsAnimating(true);
-    setIsFlipped(!isFlipped);
-    setTimeout(() => setIsAnimating(false), 500);
-  };
-
-  const handleNext = () => {
-    if (currentIndex < cards.length - 1) {
-      if (isFlipped) {
-         setIsFlipped(false);
-         setTimeout(() => setCurrentIndex(prev => prev + 1), 300);
-      } else {
-         setCurrentIndex(prev => prev + 1);
-      }
-    }
-  };
-
-  const handlePrev = () => {
-    if (currentIndex > 0) {
-      if (isFlipped) {
-         setIsFlipped(false);
-         setTimeout(() => setCurrentIndex(prev => prev - 1), 300);
-      } else {
-         setCurrentIndex(prev => prev - 1);
-      }
-    }
-  };
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'ArrowRight') handleNext();
-      if (e.key === 'ArrowLeft') handlePrev();
-      if (e.key === ' ') { e.preventDefault(); handleFlip(); }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, isFlipped, cards.length]);
-
-  if (!currentCard) return <div className="p-8">No cards available.</div>;
-
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
-      <div className="w-full max-w-3xl mb-8 flex justify-between items-end">
-        <div>
-          <h2 className="text-2xl font-bold">{deck.title}</h2>
-          <p className="text-slate-500 text-sm mt-1">{cards.length} Cards</p>
-        </div>
-        <div className="text-sm font-medium text-slate-400">
-          Card {currentIndex + 1} of {cards.length}
-        </div>
-      </div>
-
-      <div className="w-full max-w-3xl h-1.5 bg-slate-200 rounded-full mb-10 overflow-hidden">
-        <div 
-          className="h-full bg-indigo-500 transition-all duration-300 rounded-full"
-          style={{ width: `${((currentIndex + 1) / cards.length) * 100}%` }}
-        />
-      </div>
-
-      <div className="w-full max-w-3xl h-[400px] perspective-1000 mb-12">
-        <div 
-          className={`relative w-full h-full transition-transform duration-500 transform-style-3d cursor-pointer ${isFlipped ? 'rotate-y-180' : ''}`}
-          onClick={handleFlip}
-        >
-          <div className="absolute inset-0 backface-hidden flex flex-col items-center justify-center p-10 bg-white rounded-3xl shadow-lg border border-slate-200">
-             <span className="absolute top-6 left-6 text-xs font-bold uppercase text-indigo-500">Question</span>
-             <h3 className="text-2xl font-semibold text-center">{currentCard.question}</h3>
           </div>
-
-          <div className="absolute inset-0 backface-hidden rotate-y-180 flex flex-col items-center justify-center p-10 bg-indigo-50 rounded-3xl shadow-lg border border-indigo-100">
-             <span className="absolute top-6 left-6 text-xs font-bold uppercase text-indigo-600">Answer</span>
-             <div className="max-h-full overflow-y-auto scrollbar-hide py-8">
-                <p className="text-xl font-medium text-center">{currentCard.answer}</p>
-             </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center space-x-6">
-        <button onClick={handlePrev} disabled={currentIndex === 0} className="w-14 h-14 rounded-full flex items-center justify-center bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 shadow-sm"><ChevronLeft className="w-7 h-7" /></button>
-        <button onClick={handleFlip} className="px-8 py-3 rounded-full bg-slate-100 border border-slate-200 font-medium hover:bg-slate-200">Flip Card</button>
-        <button onClick={handleNext} disabled={currentIndex === cards.length - 1} className="w-14 h-14 rounded-full flex items-center justify-center bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 shadow-sm"><ChevronRight className="w-7 h-7" /></button>
+        )}
       </div>
     </div>
   );
