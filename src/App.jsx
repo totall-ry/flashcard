@@ -20,7 +20,7 @@ import {
 } from 'firebase/firestore';
 import { 
   UploadCloud, Loader2, Library, Plus, ChevronLeft, ChevronRight, 
-  Menu, X, ArrowLeft, RotateCcw, LogOut, Trash2, Mail, Lock 
+  Menu, X, ArrowLeft, RotateCcw, LogOut, Trash2, Mail, Lock, FileText 
 } from 'lucide-react';
 import JSZip from 'jszip';
 
@@ -111,25 +111,61 @@ export default function App() {
 
     try {
       setLoading(true);
-      setLoadingText("Extracting text from PowerPoint...");
       setIsMobileMenuOpen(false);
-
-      const zip = new JSZip();
-      const loadedZip = await zip.loadAsync(file);
       let fullText = "";
 
-      for (const [filename, fileData] of Object.entries(loadedZip.files)) {
-        if (filename.startsWith('ppt/slides/slide') && filename.endsWith('.xml')) {
-          const xmlData = await fileData.async('string');
-          const matches = xmlData.match(/<a:t>.*?<\/a:t>/g);
-          if (matches) {
-            fullText += matches.map(m => m.replace(/<a:t>|<\/a:t>/g, '')).join(' ') + " \n";
+      const fileName = file.name.toLowerCase();
+
+      // --- PPTX PARSER ---
+      if (fileName.endsWith('.pptx')) {
+        setLoadingText("Extracting text from PowerPoint...");
+        const zip = new JSZip();
+        const loadedZip = await zip.loadAsync(file);
+        
+        for (const [filename, fileData] of Object.entries(loadedZip.files)) {
+          if (filename.startsWith('ppt/slides/slide') && filename.endsWith('.xml')) {
+            const xmlData = await fileData.async('string');
+            const matches = xmlData.match(/<a:t>.*?<\/a:t>/g);
+            if (matches) {
+              fullText += matches.map(m => m.replace(/<a:t>|<\/a:t>/g, '')).join(' ') + " \n";
+            }
           }
         }
+      } 
+      // --- PDF PARSER ---
+      else if (fileName.endsWith('.pdf')) {
+        setLoadingText("Extracting text from PDF...");
+        
+        // Dynamically load Mozilla's PDF.js to avoid Vite build errors
+        if (!window.pdfjsLib) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+            script.onload = () => {
+              window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+              resolve();
+            };
+            script.onerror = () => reject(new Error("Failed to load PDF engine"));
+            document.head.appendChild(script);
+          });
+        }
+
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          fullText += textContent.items.map(item => item.str).join(' ') + " \n";
+        }
+      } 
+      else {
+        throw new Error("Unsupported file format. Please upload a .pptx or .pdf file.");
       }
 
-      if (!fullText.trim()) throw new Error("No readable text found in this PPTX.");
+      if (!fullText.trim()) throw new Error("No readable text found in this file.");
 
+      // --- AI GENERATION ---
       setLoadingText("Generating smart flashcards with AI...");
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -141,12 +177,13 @@ export default function App() {
         const errData = await response.json().catch(() => ({}));
         throw new Error(`Backend Error: ${errData.error || response.statusText}`);
       }
-      const data = await response.json();
       
+      const data = await response.json();
       if (!data.flashcards || data.flashcards.length === 0) throw new Error("AI returned empty flashcards.");
 
+      // --- SAVE TO FIREBASE ---
       setLoadingText("Saving deck...");
-      const deckName = file.name.replace('.pptx', '');
+      const deckName = file.name.replace(/\.(pptx|pdf)$/i, '');
       const deckRef = await addDoc(collection(db, 'users', user.uid, 'decks'), {
         name: deckName,
         cards: data.flashcards,
@@ -338,7 +375,7 @@ export default function App() {
           ))}
           {decks.length === 0 && (
             <div className="px-2 py-6 text-sm text-gray-500 text-center border-2 border-dashed border-gray-800 rounded-xl mt-4">
-              No decks yet.<br/>Upload a PPTX to begin!
+              No decks yet.<br/>Upload a file to begin!
             </div>
           )}
         </div>
@@ -363,26 +400,26 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Content Area - ADDED overflow-y-auto HERE to allow scrolling in landscape */}
+      {/* Main Content Area */}
       <div className="flex-1 flex flex-col pt-16 md:pt-0 h-full w-full bg-gray-50/50 relative overflow-y-auto">
         {!activeDeck ? (
           <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center w-full min-h-max pb-24">
             <div className="max-w-xl w-full bg-white rounded-3xl shadow-xl p-8 sm:p-14 border border-gray-100">
               <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
-                 <UploadCloud className="text-indigo-600" size={40} />
+                 <FileText className="text-indigo-600" size={40} />
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-4">Upload Presentation</h2>
+              <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-4">Upload Document</h2>
               <p className="text-gray-500 mb-8 leading-relaxed sm:text-lg">
-                Transform your lecture slides into interactive flashcards automatically. We support .pptx files.
+                Transform your lecture slides and study guides into interactive flashcards automatically. We support .pptx and .pdf files.
               </p>
               
               <label htmlFor="file-upload" className={`relative flex items-center justify-center w-full py-4 px-6 rounded-2xl text-lg font-bold text-white transition-all cursor-pointer ${loading ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg hover:-translate-y-1'}`}>
                 {loading ? (
                   <span className="flex items-center gap-3"><Loader2 className="animate-spin" size={24}/> Processing File...</span>
                 ) : (
-                  <span className="flex items-center gap-3"><Plus size={24}/> Select PPTX File</span>
+                  <span className="flex items-center gap-3"><Plus size={24}/> Select File (.pptx / .pdf)</span>
                 )}
-                <input id="file-upload" type="file" accept=".pptx" className="hidden" onChange={handleFileUpload} disabled={loading} />
+                <input id="file-upload" type="file" accept=".pptx,.pdf" className="hidden" onChange={handleFileUpload} disabled={loading} />
               </label>
               
               {loading && <p className="mt-6 text-sm font-semibold text-indigo-600 animate-pulse bg-indigo-50 py-2 px-4 rounded-full inline-block">{loadingText}</p>}
@@ -401,7 +438,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Flashcard 3D Wrapper - Removed aspect ratio and added safe h-[55vh] constraints */}
             <div className="relative w-full h-[55vh] min-h-[320px] max-h-[450px] max-w-3xl mx-auto [perspective:1200px] group mb-8 shrink-0">
               <div className={`w-full h-full transition-all duration-500 [transform-style:preserve-3d] cursor-pointer ${isFlipped ? '[transform:rotateY(180deg)]' : ''}`}>
                 
