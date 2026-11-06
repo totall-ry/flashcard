@@ -16,11 +16,13 @@ import {
   orderBy, 
   serverTimestamp, 
   deleteDoc, 
-  doc 
+  doc,
+  updateDoc
 } from 'firebase/firestore';
 import { 
   UploadCloud, Loader2, Library, Plus, ChevronLeft, ChevronRight, 
-  Menu, X, ArrowLeft, RotateCcw, LogOut, Trash2, Mail, Lock, FileText 
+  Menu, X, ArrowLeft, RotateCcw, LogOut, Trash2, Mail, Lock, FileText,
+  Edit2, Check, Shuffle
 } from 'lucide-react';
 import JSZip from 'jszip';
 
@@ -58,6 +60,10 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [continuePortrait, setContinuePortrait] = useState(false);
 
+  // QoL States
+  const [editingDeckId, setEditingDeckId] = useState(null);
+  const [editDeckName, setEditDeckName] = useState("");
+
   // Authenticate & Load Decks
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -78,6 +84,25 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // --- QoL: KEYBOARD NAVIGATION ---
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!activeDeck || editingDeckId) return; // Disable if not in a deck or if renaming
+      
+      // Ignore if typing in an input field (just in case)
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'ArrowRight') nextCard();
+      if (e.key === 'ArrowLeft') prevCard();
+      if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault(); // Stop page from scrolling on space/arrows
+        setIsFlipped(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeDeck, editingDeckId]);
 
   // --- AUTHENTICATION HANDLERS ---
   const handleAuthSubmit = async (e) => {
@@ -116,7 +141,7 @@ export default function App() {
 
       const fileName = file.name.toLowerCase();
 
-      // --- PPTX PARSER ---
+      // PPTX PARSER
       if (fileName.endsWith('.pptx')) {
         setLoadingText("Extracting text from PowerPoint...");
         const zip = new JSZip();
@@ -132,11 +157,10 @@ export default function App() {
           }
         }
       } 
-      // --- PDF PARSER ---
+      // PDF PARSER
       else if (fileName.endsWith('.pdf')) {
         setLoadingText("Extracting text from PDF...");
         
-        // Dynamically load Mozilla's PDF.js to avoid Vite build errors
         if (!window.pdfjsLib) {
           await new Promise((resolve, reject) => {
             const script = document.createElement('script');
@@ -165,7 +189,7 @@ export default function App() {
 
       if (!fullText.trim()) throw new Error("No readable text found in this file.");
 
-      // --- AI GENERATION ---
+      // AI GENERATION
       setLoadingText("Generating smart flashcards with AI...");
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -181,7 +205,7 @@ export default function App() {
       const data = await response.json();
       if (!data.flashcards || data.flashcards.length === 0) throw new Error("AI returned empty flashcards.");
 
-      // --- SAVE TO FIREBASE ---
+      // SAVE TO FIREBASE
       setLoadingText("Saving deck...");
       const deckName = file.name.replace(/\.(pptx|pdf)$/i, '');
       const deckRef = await addDoc(collection(db, 'users', user.uid, 'decks'), {
@@ -216,6 +240,45 @@ export default function App() {
         alert("Failed to delete deck.");
       }
     }
+  };
+
+  // --- QoL: RENAME HANDLERS ---
+  const handleRenameStart = (e, deck) => {
+    e.stopPropagation();
+    setEditingDeckId(deck.id);
+    setEditDeckName(deck.name);
+  };
+
+  const handleRenameSave = async (e, deckId) => {
+    e.stopPropagation();
+    if (!editDeckName.trim()) {
+      setEditingDeckId(null);
+      return;
+    }
+    
+    try {
+      await updateDoc(doc(db, 'users', user.uid, 'decks', deckId), {
+        name: editDeckName.trim()
+      });
+      
+      // Update local state
+      setDecks(decks.map(d => d.id === deckId ? { ...d, name: editDeckName.trim() } : d));
+      if (activeDeck?.id === deckId) {
+        setActiveDeck({ ...activeDeck, name: editDeckName.trim() });
+      }
+    } catch (err) {
+      alert("Failed to rename deck.");
+    } finally {
+      setEditingDeckId(null);
+    }
+  };
+
+  // --- QoL: SHUFFLE HANDLER ---
+  const handleShuffle = () => {
+    const shuffledCards = [...activeDeck.cards].sort(() => Math.random() - 0.5);
+    setActiveDeck({ ...activeDeck, cards: shuffledCards });
+    setCurrentCardIndex(0);
+    setIsFlipped(false);
   };
 
   const nextCard = () => {
@@ -349,28 +412,58 @@ export default function App() {
           
           {decks.map(deck => (
             <div key={deck.id} className={`w-full rounded-xl transition-all duration-200 flex items-center justify-between group ${activeDeck?.id === deck.id ? 'bg-indigo-600 shadow-md' : 'hover:bg-gray-800'}`}>
-              <button
-                onClick={() => {
-                  setActiveDeck(deck);
-                  setCurrentCardIndex(0);
-                  setIsFlipped(false);
-                  setIsMobileMenuOpen(false);
-                }}
-                className="flex-1 text-left px-4 py-3 flex items-center justify-between truncate"
-              >
-                <span className={`truncate pr-2 font-medium ${activeDeck?.id === deck.id ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>{deck.name}</span>
-                <span className={`text-xs px-2 py-1 rounded-full ${activeDeck?.id === deck.id ? 'bg-indigo-500' : 'bg-gray-700 text-gray-300'}`}>
-                  {deck.cards.length}
-                </span>
-              </button>
               
-              <button 
-                onClick={(e) => handleDeleteDeck(e, deck.id)}
-                className={`p-3 text-gray-400 hover:text-red-400 transition-colors ${activeDeck?.id === deck.id ? 'text-indigo-200 hover:text-white' : ''}`}
-                title="Delete Deck"
-              >
-                <Trash2 size={18} />
-              </button>
+              {/* QoL: RENAME INLINE INPUT */}
+              {editingDeckId === deck.id ? (
+                <div className="flex-1 flex items-center px-3 py-2 gap-2 w-full">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={editDeckName}
+                    onChange={(e) => setEditDeckName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleRenameSave(e, deck.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-1 w-full bg-gray-900 text-white border border-gray-600 rounded px-2 py-1 text-sm outline-none focus:border-indigo-400"
+                  />
+                  <button onClick={(e) => handleRenameSave(e, deck.id)} className="text-green-400 hover:text-green-300 p-1 bg-gray-800 rounded">
+                    <Check size={16} />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setActiveDeck(deck);
+                      setCurrentCardIndex(0);
+                      setIsFlipped(false);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="flex-1 text-left px-4 py-3 flex items-center justify-between truncate"
+                  >
+                    <span className={`truncate pr-2 font-medium ${activeDeck?.id === deck.id ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>{deck.name}</span>
+                    <span className={`text-xs px-2 py-1 rounded-full ${activeDeck?.id === deck.id ? 'bg-indigo-500' : 'bg-gray-700 text-gray-300'}`}>
+                      {deck.cards.length}
+                    </span>
+                  </button>
+                  
+                  <div className="flex items-center pr-2 gap-1">
+                    <button 
+                      onClick={(e) => handleRenameStart(e, deck)}
+                      className={`p-1.5 text-gray-400 hover:text-indigo-300 transition-colors ${activeDeck?.id === deck.id ? 'text-indigo-200 hover:text-white' : ''}`}
+                      title="Rename Deck"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button 
+                      onClick={(e) => handleDeleteDeck(e, deck.id)}
+                      className={`p-1.5 text-gray-400 hover:text-red-400 transition-colors ${activeDeck?.id === deck.id ? 'text-indigo-200 hover:text-white' : ''}`}
+                      title="Delete Deck"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
           {decks.length === 0 && (
@@ -433,7 +526,7 @@ export default function App() {
                 <ArrowLeft size={18} /> <span className="hidden sm:inline">Back to Library</span>
               </button>
               <div className="text-right">
-                <h2 className="text-lg sm:text-2xl font-bold text-gray-900 truncate max-w-[150px] sm:max-w-sm">{activeDeck.name}</h2>
+                <h2 className="text-lg sm:text-2xl font-bold text-gray-900 truncate max-w-[150px] sm:max-w-sm" title={activeDeck.name}>{activeDeck.name}</h2>
                 <p className="text-indigo-600 font-medium text-sm sm:text-base">Card {currentCardIndex + 1} of {activeDeck.cards.length}</p>
               </div>
             </div>
@@ -449,7 +542,7 @@ export default function App() {
                      </h3>
                   </div>
                   <div className="absolute bottom-4 sm:bottom-8 text-indigo-400 text-xs sm:text-sm font-bold tracking-widest uppercase">
-                    Tap to reveal answer
+                    Tap (or Spacebar) to reveal
                   </div>
                 </div>
 
@@ -461,7 +554,7 @@ export default function App() {
                     </h3>
                   </div>
                   <div className="absolute bottom-4 sm:bottom-8 text-indigo-200 text-xs sm:text-sm font-bold tracking-widest uppercase bg-indigo-600/80 px-4 py-1 rounded-full">
-                    Tap to see question
+                    Tap (or Spacebar) to return
                   </div>
                 </div>
 
@@ -469,16 +562,27 @@ export default function App() {
             </div>
 
             {/* Controls */}
-            <div className="flex items-center justify-center gap-4 sm:gap-8 mb-6 sm:mb-0">
+            <div className="flex items-center justify-center gap-3 sm:gap-6 mb-6 sm:mb-0">
+              
+              {/* QoL: SHUFFLE BUTTON */}
+              <button onClick={handleShuffle} className="p-3 sm:p-4 rounded-full bg-white shadow hover:shadow-md text-gray-500 hover:text-indigo-600 transition-all active:scale-95" title="Shuffle Cards">
+                <Shuffle size={20} />
+              </button>
+
               <button onClick={prevCard} className="p-4 sm:p-5 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-indigo-50 text-gray-800 transition-all hover:-translate-y-1 active:scale-95 focus:ring-4 focus:ring-indigo-100">
                 <ChevronLeft size={28} />
               </button>
-              <div className="h-3 w-32 sm:w-48 bg-gray-200 rounded-full overflow-hidden shadow-inner">
+              
+              <div className="h-3 w-20 sm:w-48 bg-gray-200 rounded-full overflow-hidden shadow-inner">
                  <div className="h-full bg-indigo-600 transition-all duration-300 ease-out" style={{ width: `${((currentCardIndex + 1) / activeDeck.cards.length) * 100}%` }}></div>
               </div>
+              
               <button onClick={nextCard} className="p-4 sm:p-5 rounded-full bg-white shadow-lg hover:shadow-xl hover:bg-indigo-50 text-gray-800 transition-all hover:-translate-y-1 active:scale-95 focus:ring-4 focus:ring-indigo-100">
                 <ChevronRight size={28} />
               </button>
+              
+              {/* Invisible spacer to keep the progress bar perfectly centered next to the shuffle button */}
+              <div className="w-[44px] sm:w-[52px]"></div>
             </div>
 
           </div>
