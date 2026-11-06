@@ -367,3 +367,4 @@ export default function App() {
               </p>
               
               <label htmlFor="file-upload" className={`relative flex items-center justify-center w-full py-4 px-6 rounded-2xl text-lg font-bold text-white transition-all cursor-pointer ${loading ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg hover:-translate-y-1'}`}>
+            </label>
